@@ -1,12 +1,3 @@
-"""
-Training Script — Shahin & Ahmed (2024) Architecture
-=====================================================
-Usage:
-    python train.py --model wav2vec2 --data_dir /path/to/l2arctic
-    python train.py --model whisper  --data_dir /path/to/l2arctic
-    python train.py --model wav2vec2 --resume outputs/wav2vec2_best.pt
-"""
-
 import os, sys, json, argparse, time, random
 import numpy as np
 import torch
@@ -15,7 +6,7 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.amp import GradScaler, autocast
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from data.dataset   import L2ArcticDataset, get_train_val_test_split
 from data.collators import Wav2Vec2Collator, WhisperCollator
 from models.phonological_models import Wav2Vec2ForPhonology, WhisperForPhonology
@@ -44,8 +35,8 @@ def get_config(model_type):
 def train_epoch(model, loader, optimizer, scheduler, scaler,
                 loss_fn, config, device, model_type, epoch):
     model.train()
-    total_loss, optimizer.zero_grad()
     total_loss = 0.0
+    optimizer.zero_grad()
 
     for i, batch in enumerate(loader):
         if model_type == "wav2vec2":
@@ -62,7 +53,6 @@ def train_epoch(model, loader, optimizer, scheduler, scaler,
 
         with autocast("cuda"):
             logits = model(**inputs)
-            # Clamp input_lengths to actual model output length
             T = logits.shape[1]
             clamped_il = input_lengths.clamp(max=T)
             loss = loss_fn(logits, phon_targets,
@@ -145,12 +135,10 @@ def main():
 
     os.makedirs(config["save_dir"], exist_ok=True)
 
-    # Dataset
     cache = f"{config['save_dir']}/metadata_cache.json"
     dataset = L2ArcticDataset(args.data_dir, cache_path=cache)
     train_set, val_set, test_set = get_train_val_test_split(dataset)
 
-    # Collators
     collator = (Wav2Vec2Collator(config["model_name"])
                 if args.model == "wav2vec2"
                 else WhisperCollator(config["model_name"]))
@@ -165,7 +153,6 @@ def main():
                               shuffle=False, collate_fn=collator,
                               num_workers=config["num_workers"])
 
-    # Model
     model = (Wav2Vec2ForPhonology(config["model_name"])
              if args.model == "wav2vec2"
              else WhisperForPhonology(config["model_name"]))
@@ -181,7 +168,7 @@ def main():
     loss_fn   = SCTCSBLoss().to(device)
     evaluator = PhonologicalEvaluator()
 
-    start_epoch  = 1
+    start_epoch   = 1
     best_macro_f1 = 0.0
     save_path = f"{config['save_dir']}/{args.model}_best.pt"
 
@@ -223,7 +210,6 @@ def main():
                            save_path)
                 print(f"  ✓ Saved best (macro F1: {best_macro_f1:.4f})")
 
-    # Test evaluation
     print("\nLoading best model for test evaluation...")
     ckpt = torch.load(save_path, map_location=device, weights_only=False)
     model.load_state_dict(ckpt["model"])
@@ -234,7 +220,7 @@ def main():
     with open(f"{config['save_dir']}/{args.model}_results.json", "w") as f:
         json.dump({"config": config, "history": history,
                    "test_results": test_res}, f, indent=2)
-    print(f"\nDone. Results saved.")
+    print("Done.")
 
 
 if __name__ == "__main__":
